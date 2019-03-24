@@ -1,0 +1,881 @@
+#include<LiquidCrystal.h>
+#include <Stepper.h>
+#include <SoftwareSerial.h>
+#include<String.h>
+#define ON 1
+#define OFF 0
+
+const int stepsPerRevolution = 100;
+// initialize the stepper library on pins 8 through 11:
+Stepper myStepper1(stepsPerRevolution, 8, 9, 10, 11);
+Stepper myStepper2(stepsPerRevolution, 3, 4, 5, 6);
+#include <Servo.h>    // 声明调用Servo.h库
+int pos = 0;          // 变量pos用来存储舵机位置
+
+boolean dir; //= -1;正反转
+int stepperSpeed = 80;//电机转速,1ms一步
+
+Servo s; //超声波转向舵机
+Servo sUp;
+Servo sDown;
+int trig = 7; //发射信号
+int echo = 2; //接收信号
+unsigned int S; //距离存储
+int step_left = 1;
+
+//红外循迹传感器
+const int SensorRight = 22;     //右循迹红外传感器(P3.2 OUT1)
+const int SensorLeft = 24;       //左循迹红外传感器(P3.3 OUT2)
+const int SensorMiddle = 26;      //中循迹红外传感器(P3.3 OUT3)
+int SL;    //左循迹红外传感器状态
+int SR;    //右循迹红外传感器状态
+int SM;   //中循迹红外传感器状态
+
+//蓝牙接口
+const int blueTooth = 13;
+
+//画圆
+int circleNum = 1057;
+
+//画长方形
+int lengthNum = 6;
+int wideNum =  4 ;
+int turnNum_rec = 260;
+
+//画三角
+int edegeNum = 6;
+int triangleNum = 345;
+
+//前后灯
+int frontL = 28;
+int frontR = 30;
+int rearR = 48;
+int rearL = 50;
+
+//彩灯
+int LED_R=42;
+int LED_G=38;
+int LED_B=36;
+int RedPin=0;
+int GreenPin=0;
+int BluePin=0;
+
+//loop
+String comdata = "";
+String tem = "";
+bool j = false;
+
+//超声波监测物体距离
+int distance;
+
+//温度传感器
+int potPin = A15;
+
+//温度相关变量
+float val = 0;
+float t =0;
+
+//无源蜂鸣器
+int buzzPin = 34;
+
+//调整相机角度
+int angleUp = 90;
+int angleDown = 90;
+
+bool gs = true;
+bool bz = true;
+bool xj = true;
+
+
+//=================================================接口setup================================================================================
+void setup() {
+  Serial.begin(9600); //设置波特率
+  Serial3.begin(9600);
+  pinMode(trig, OUTPUT); //设置引脚模式
+  pinMode(echo, INPUT);
+
+  pinMode(frontL, OUTPUT);//灯的引脚
+  pinMode(frontR, OUTPUT);
+  //pinMode(rearL, OUTPUT);
+  //pinMode(rearR, OUTPUT);
+  digitalWrite(frontL, LOW);
+  digitalWrite(frontR, LOW);
+  //digitalWrite(rearL, LOW);
+  //digitalWrite(rearR, LOW);
+
+
+  s.attach(12); //定义舵机所用引脚
+  s.write(90); //初始化舵机角度
+  sUp.attach(32); //定义舵机所用引脚
+  s.write(90); //初始化舵机角度
+  sDown.attach(31); //定义舵机所用引脚
+  s.write(90); //初始化舵机角度
+
+  myStepper1.setSpeed(60);//设置步进电机转速
+  myStepper2.setSpeed(60);//设置步进电机转速
+
+  pinMode(SensorRight, INPUT); //定义右循迹红外传感器为输入
+  pinMode(SensorLeft, INPUT); //定义左循迹红外传感器为输入
+  pinMode(SensorMiddle, INPUT); //定义中循迹红外传感器为输入
+
+  pinMode(blueTooth, OUTPUT); //蓝牙接口
+
+  pinMode(potPin, INPUT);
+  pinMode(buzzPin, OUTPUT);
+
+  delay(2000); //开机延时
+}
+
+//=====================================================================函数库：测距、判断转向、停止、全速前进、后退===============================================================
+//测距：void range()
+//判断转向：void turn()、void turn_right()、void turn_left()
+//停止：void stopCar()
+//全速前进：void get_forward()
+//后退：void get_back()
+//温度：void temperature()
+//报警：void alert()
+
+int range() { //测距函数
+  digitalWrite(trig, LOW); //测距
+  delayMicroseconds(2); //延时2微秒
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(20);
+  digitalWrite(trig, LOW);
+  int distance = pulseIn(echo, HIGH); //读取高电平时间
+  distance = distance / 58; //按照公式计算
+  S = distance; //把值赋给S
+  return S;
+  Serial3.println(S); //向串口发送S的值，可以在显示器上显示距离
+}
+
+void turn()
+{ //判断转向函数
+  s.write(160); //舵机转到170度既左边（角度与安装方式有关）
+  delay(1000); //留时间给舵机转向
+  range(); //运行测距函数
+  s.write(90); //测距完成，舵机回到中位
+  delay(1000); //留时间给舵机转向
+  //Serial.println("Now the left distance is :");
+  //Serial.println(S);
+  if (S > 30)
+  {
+    turn_left();
+  } //判断左边障碍物距离，如果距离充足,运行左转
+  else
+  {
+    s.write(20); //否则，舵机转动到10度，测右边距离
+    delay(1000);
+    range(); //测距
+    s.write(90); //中位
+    delay(1000);
+
+    if (S > 30)
+    {
+      turn_right();
+    } //右转
+    else {
+      get_back();
+    }
+  }
+}
+
+void stopCar() {
+  myStepper2.step(0);
+  myStepper1.step(0);
+}//停止模块
+
+void get_forward() {
+  int s = stepperSpeed;
+  digitalWrite(frontR, HIGH);
+  digitalWrite(frontL, HIGH);
+  while (s > 0)
+  { 
+    myStepper2.step(-1);
+    myStepper1.step(1);
+    s--;
+  }
+  digitalWrite(frontR, LOW);
+  digitalWrite(frontL, LOW);
+  s = stepperSpeed;
+}//全速前进模块
+
+void turn_right() {
+  //digitalWrite(rearR, HIGH);
+  digitalWrite(frontR, HIGH);
+  int r = 60;
+  while(r>0)
+  {
+  myStepper1.step(1);
+  myStepper2.step(1);
+  //Serial.println("Now turn right!");
+  //digitalWrite(rearR, LOW);
+  r--;
+  }
+  digitalWrite(frontR, LOW);
+}//右转模块
+
+void turn_left() {
+  digitalWrite(frontL, HIGH);
+  int l = 60;
+  //digitalWrite(rearL, HIGH);
+  while(l>0)
+  {
+  myStepper2.step(-1);
+  myStepper1.step(-1);
+  l--;
+  }
+  //Serial.println("Now turn left!");
+  digitalWrite(frontL, LOW);
+  //digitalWrite(rearL, LOW);
+}//左转模块
+
+void get_back() {
+  int s = stepperSpeed;
+  //digitalWrite(rearR, HIGH);
+  //digitalWrite(rearL, HIGH);
+  while (s > 0)
+  {
+    myStepper2.step(1);
+    myStepper1.step(-1);
+    s--;
+  }
+  //digitalWrite(rearR, LOW);
+  //digitalWrite(rearL, LOW);
+  s = stepperSpeed;
+
+}//后退
+
+void temperature() {
+  val = analogRead(potPin); //温度传感器LM35接到模拟PIN4上；val变量为从LM35信号口读取到的数值
+  t = (val*0.0048828125 *100); //把读取到的val转换为温度数值,系数一：0.00488125=5/1024,0~5V对应模拟口读数1~1024,系数二：100=1000/10,1000是毫伏与伏的转换；10是每10毫伏对应一度温升。
+  //Serial3.print((int)t);
+  if(t>40)alert();
+  delay(1000);
+}
+
+void alert()
+{
+  long frequency = 300; //频率, 单位Hz
+
+  //用tone()函数发出频率为frequency的波形
+   tone(buzzPin, frequency );
+   delay(1000); //等待1000毫秒
+   
+   noTone(buzzPin);//停止发声
+   delay(2000); //等待2000毫秒
+
+}
+
+void color_led(int v_iRed, int v_iGreen, int v_iBlue)
+{
+        //红色LED
+  if (v_iRed == ON)
+  {
+      digitalWrite(LED_R, HIGH);
+  }
+  else
+  {
+      digitalWrite(LED_R, LOW);
+  }
+        //绿色LED
+  if (v_iGreen == ON)
+  {
+      digitalWrite(LED_G, HIGH);
+  }
+  else
+  {
+      digitalWrite(LED_G, LOW);
+  }
+        //蓝色LED
+  if (v_iBlue == ON)
+  {
+            digitalWrite(LED_B, HIGH);
+  }
+  else
+  {
+      digitalWrite(LED_B, LOW);
+  }
+}
+
+
+//=====================================================================功能函数:追踪、避障、循迹============================================================================================
+//追踪：void track()
+//避障：void avoid()
+//循迹：void follow()
+//画圆：circle()
+//画矩形：rectangle()
+//画三角：triangle()
+
+//追踪
+
+void track() {
+  s.write(90); //舵机中位
+  range(); //执行测距函数
+
+  if (S < 40&&S>10)
+  {
+    get_forward(); //前进
+  }//判断障碍物距离，距离太近
+  else if (S>=40)
+  {
+    s.write(150); //舵机转到170度既左边（角度与安装方式有关）
+    delay(500); //留时间给舵机转向
+    range(); //运行测距函数
+    s.write(90); //测距完成，舵机回到中位
+    delay(500); //留时间给舵机转向
+    if (S < 40&&S>10)
+    {
+      turn_left();
+      get_forward();
+    }
+
+    else if(S>=40)
+    {
+      s.write(30); //否则，舵机转动到10度，测右边距离
+      delay(500);
+      range(); //测距
+      s.write(90); //中位
+      delay(500);
+      if (S < 40&&S>10)
+      {
+        turn_right();
+        get_forward();
+      } 
+      //else get_forward();
+    }
+  }
+}
+/**
+void track(){
+  int dis[10]={0,0,0,0,0,0,0,0,0,0}; int temp;int sum=0;
+  float ave[4]={0,0,0,0};
+  for(int j=10;j<170;j=j+50){
+    s.write(j);
+    delay(500);
+    for(int i=0;i<5;i++){
+      temp=range();
+      if(0<temp){ dis[i]=temp;}
+      Serial.print(" ");
+      Serial.print(dis[i]);
+      Serial.println();
+      sum=dis[i]+sum;
+      //Serial.print(sum); Serial.print("");
+      ave[(j-10)/50]=sum/10;
+      //Serial.println(ave[(j-10)/50]);
+      sum=0;
+      delay(100);
+    }
+  s.write(90);
+  if(ave[1]<ave[0]&&ave[1]<ave[3]&&ave[2]<ave[0]&&ave[2]<ave[3]){
+    get_forward();
+  }
+  else if(ave[0]<ave[2]&&ave[0]<ave[3]&&ave[1]<ave[2]&&ave[1]<ave[3]){
+    turn_right();
+  }
+  else if(ave[2]<ave[0]&&ave[2]<ave[1]&&ave[3]<ave[0]&&ave[3]<ave[1]){
+    turn_left();
+  }
+  
+}
+}
+*/
+//避障
+void avoid() {
+  s.write(90); //舵机中位
+  range(); //执行测距函数
+  if (S < 10)
+  {
+    get_back(); //后退
+  }//判断障碍物距离，距离太近
+
+  else if (S <= 40 && S > 10)
+  {
+    turn(); //运行转向判断函数
+  }//距离中等,转向
+
+  else
+  {
+    get_forward(); //运行直行函数
+  }//距离充足，前进
+}
+
+//循迹
+void follow() {
+  while (1)
+  {
+    SR = digitalRead(SensorRight);
+    //有信号表明在白色区域，车子底板上L3亮；没信号表明压在黑线上，车子底板上L3灭
+    SL = digitalRead(SensorLeft);
+    //有信号表明在白色区域，车子底板上L2亮；没信号表明压在黑线上，车子底板上L2灭
+    SM = digitalRead(SensorMiddle);
+    //有信号表明在白色区域，车子底板上L1亮；没信号表明压在黑线上，车子底板上L1灭
+
+    if ((SL == LOW && SR == LOW && SM == HIGH) ||
+        (SL == LOW && SR == HIGH && SM == HIGH) || (SL == HIGH && SM == HIGH && SR == LOW))
+    {
+      int s = 10;
+      digitalWrite(frontR, HIGH);
+      digitalWrite(frontL, HIGH);
+      while (s > 0)
+      {
+        myStepper2.step(-1);
+        myStepper1.step(1);
+        s--;
+      }
+      s = 30;
+      digitalWrite(frontR, LOW);
+      digitalWrite(frontL, LOW);
+    }
+
+    // 左循迹红外传感器,检测到信号，车子向右偏离轨道，向左转
+    else if (SL == HIGH & SR == LOW && SM == LOW)
+    {
+      digitalWrite(frontL, HIGH);
+      digitalWrite(rearL, HIGH);
+      myStepper2.step(-30);
+      digitalWrite(frontL, HIGH);
+      digitalWrite(rearL, HIGH);
+    }
+
+    // 右循迹红外传感器,检测到信号，车子向左偏离轨道，向右转
+    else if (SR == HIGH & SL == LOW && SM == LOW)
+    {
+      digitalWrite(rearR, HIGH);
+      digitalWrite(frontR, HIGH);
+      myStepper1.step(30);
+      digitalWrite(rearR, LOW);
+      digitalWrite(frontR, LOW);
+    }
+
+    // 都是黑色, 停止
+    else if ((SR == HIGH && SL == HIGH && SM == HIGH) ||
+             (SR == LOW && SL == LOW && SM == LOW))
+    {
+      stopCar();
+    }
+
+  }
+}
+
+void circle()//画圆函数
+{
+  myStepper1.step(circleNum);
+}
+
+
+void rectangle()//画矩形
+{  
+  String len = "";
+  int i = 9;
+  for(;i<comdata.length();i++)
+  {
+    if(comdata[i] == ',') break;
+    len += comdata[i];
+  }  
+  i++;
+  String wid = "";
+  for(;i< comdata.length();i++)
+  {
+    wid += comdata[i];
+  }
+  
+  int lenthNum = len.toInt();
+  int wideNum = wid.toInt();
+  int l=lenthNum;
+  while (l > 0)
+  {
+    get_forward();
+    l--;
+  }
+  l = lengthNum;
+  myStepper1.step(turnNum_rec);
+  int w=wideNum;
+  while (w > 0)
+  {
+    get_forward();
+    w--;
+  }
+  w = wideNum;
+  myStepper1.step(turnNum_rec);
+
+  while (l > 0)
+  {
+    get_forward();
+    l--;
+  }
+  l = lengthNum;
+  myStepper1.step(turnNum_rec);
+  while (w > 0)
+  {
+    get_forward();
+    w--;
+  }
+  w = wideNum;
+  myStepper1.step(turnNum_rec);
+}
+
+void triangle()//画三角
+{
+  String tri = "";
+ for(int i = 8;i< comdata.length();i++)
+ {
+  tri += comdata[i];
+ }
+  int edegeNum = tri.toInt();
+  int e=edegeNum;
+  
+  while (e > 0)
+  {
+    get_forward();
+    e--;
+  }
+  e = edegeNum;
+  myStepper1.step(triangleNum);
+
+  while (e > 0)
+  {
+    get_forward();
+    e--;
+  }
+  e = edegeNum;
+  myStepper1.step(triangleNum);
+
+  while (e > 0)
+  {
+    get_forward();
+    e--;
+  }
+  e = edegeNum;
+  myStepper1.step(triangleNum);
+}
+
+//==============================================loop主函数=================================================================================
+void loop() {
+  //获取蓝牙输入
+  //Serial.print("unlock");
+  while ((Serial3.available() > 0)||(Serial.available()>0))
+  {
+    
+    if(Serial3.available() > 0)
+    {
+      tem += char(Serial3.read());
+      j = true;
+      delay(2);
+     }
+     if(Serial.available()>0)
+     {
+      tem += char(Serial.read());
+      j = true;
+      delay(2);
+     }
+     
+  }
+ /* 
+  while (Serial.available() > 0)
+  {
+    color_led(RedPin,GreenPin,BluePin);
+    tem += char(Serial.read());
+    j = true;
+    delay(2);
+  }
+  */
+  if (j) comdata = "" + tem;
+
+  tem = "";
+  j = false;
+
+  //Serial.print("指令是");
+  //Serial.print(comdata);
+  //Serial.print("\n");
+  color_led(RedPin,GreenPin,BluePin);
+  //color_led(ON,OFF,OFF);
+  //digitalWrite(LED_R, HIGH);
+  delay(1000);
+  if (comdata == "zhuizong1") //追踪
+  { if(gs)
+    {
+      Serial.println("$$follow robot");
+      gs = false;
+    }
+    track();
+  }
+  else if (comdata == "zhuizong0")
+    {
+      stopCar();
+      gs = true;
+      xj = true;
+      bz = true;
+    }
+
+  else if (comdata == "xunji1") //循迹
+    {
+      if(xj)
+      {
+        Serial.println("$$track");
+        xj = false;
+      }
+      follow();
+    }
+  else if (comdata == "xunji0")
+    {
+      stopCar();      
+      gs = true;
+      xj = true;
+      bz = true;
+    }
+
+  else if (comdata == "bizhang1") //避障
+    {
+      if(bz)
+      {
+        Serial.println("$$avoid the obstacles");
+        bz = false;
+      }
+      avoid();
+    }
+  else if (comdata == "bizhang0")
+    {
+      stopCar();
+      gs = true;
+      xj = true;
+      bz = true;
+    }
+
+  else if (comdata == "circle")
+    {
+      Serial.println("$$move in a circle shape");
+      circle();
+    }
+  else if (comdata.startsWith("rectangle"))
+   {
+    Serial.println("$$move in a rectangle shape.");
+    rectangle();
+    }
+  else if (comdata.startsWith( "triangle"))
+   {
+    Serial.println("$$move in a triangle shape"); 
+    triangle();}
+
+  else if (comdata == "stop")
+    {
+      stopCar();
+      gs = true;
+      xj = true;
+      bz = true;
+    }
+    
+  else if (comdata == "get_forward")
+    {
+      Serial.println("$$move forward");
+      get_forward();
+    }
+  else if (comdata == "get_back")
+    {
+      Serial.println("$$move back");
+      get_back();
+    }
+  else if (comdata == "turn_left")
+    {
+      Serial.println("$$turn left");
+      turn_left();
+    }
+  else if (comdata == "turn_right")
+    {
+      Serial.println("$$turn right");
+      turn_right();
+    }
+  else if (comdata == "temperature")
+    {
+      Serial.println("$$detetct the temperature");
+      temperature();
+      Serial3.println((int)t);
+      comdata = "";
+    }
+
+  else if(comdata =="distance")
+  {
+    Serial.println("$$detect the distance");
+    range();
+    Serial3.println((int)S);
+    comdata = "";
+  }
+    
+  else if(comdata=="unlock")
+    Serial.print("unlock");
+    else if(comdata.startsWith("red"))
+  {
+    if(comdata[3] == '0')
+        RedPin = 0;
+    else
+      RedPin = 1;
+  }
+  
+  else if(comdata.startsWith("green"))
+  {
+    if(comdata[5] == '0')
+      GreenPin = 0;
+    else
+      GreenPin = 1;
+  
+  }
+  
+  else if(comdata.startsWith("blue"))
+  {
+    if(comdata[4] == '0')
+      BluePin = 0;
+    else
+      BluePin = 1;
+  }
+
+  else if(comdata=="face")
+  {
+      sUp.write(90);
+      sDown.write(150);
+      delay(200);
+      sDown.write(30);
+      delay(200);
+      sDown.write(90);
+      delay(200);
+      sUp.write(60);
+      delay(200);
+      sUp.write(150);
+      comdata="";
+      Serial.write("face");
+      }
+
+  else if(comdata=="not")
+      {s.write(60); //否则，舵机转动到10度，测右边距离
+      delay(500);
+      s.write(90); //中位
+      delay(500);
+      comdata="";}
+  else if (comdata == "unlock")
+  {
+    Serial3.print("unlock");
+    Serial.println("unlock");
+    //comdata="";
+  }
+  
+  else if(comdata.startsWith("talk"))
+  {
+    if(comdata[4] == '1')
+      {
+        Serial.println("$$talk");
+        Serial.println("talk");
+      comdata="";}
+     else
+       {Serial.println("stop");
+       comdata="";}
+  }
+  else if(comdata == "failed")
+  {
+    Serial3.print("failed");
+    //comdata="";
+  }
+  else if(comdata == "error!")
+  {
+    Serial3.print("error!");
+    //comdata="";
+  }
+  else if(comdata == "camup")
+  {
+    angleUp += 30;
+     if(angleUp>180){
+      angleUp=180;
+    }
+    sUp.write(angleUp);
+    comdata="";
+  }
+  else if(comdata == "camdown")
+  {
+    angleUp -= 30;
+    if(angleUp<0){
+      angleUp=0;
+    }
+    sUp.write(angleUp);
+    comdata="";
+  }
+  
+  else if(comdata == "camright")
+  {
+    angleDown -= 30;
+    sDown.write(angleDown);
+    if(angleUp>180){
+      angleUp=180;
+    }
+    comdata="";
+  }
+  
+  else if(comdata == "camleft")
+  {
+    angleDown += 30;
+    if(angleUp<0){
+      angleUp=0;
+    }
+    sDown.write(angleDown);
+    comdata="";
+  }
+
+    else if(comdata == "takephoto")
+  {
+    Serial.println("$$take photo");
+    Serial.print("photo");
+    comdata="";
+  }
+  
+  else if(comdata == "faceid")
+  {
+     Serial.println("$$take face ID");
+    Serial.print("faceid");
+    comdata="";
+  }
+
+  else if(comdata == "address")
+  {
+    Serial.println("$$create the IP address");
+    Serial.print("address");
+    comdata="";
+  }
+
+  else if(comdata.startsWith("ip"))
+  {
+    Serial3.print(comdata.substring(2).length());
+    delay(50);
+    Serial3.print(comdata.substring(2)); 
+    comdata="";
+  }
+
+  else if(comdata == "dance")
+{
+  for(int i = 0;i<28;i++){
+    s.write(30);
+    sDown.write(30);
+    delay(1000);
+    s.write(150);
+    sDown.write(150);
+    delay(1000);
+  }
+  comdata="";
+}
+  else if(comdata == "showtem")
+  {
+    temperature();
+    Serial.println((int)t);
+    comdata="";
+  }
+
+  else if(comdata =="showdis")
+  {
+    range();
+    Serial.println((int)S);
+    comdata="";
+  }
+  
+  else if(comdata=="control1"){
+    //s.write(60);
+    Serial.println("$$voice control");
+    Serial.print("control");
+    comdata="";
+  }
+
+}
